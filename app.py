@@ -1,4 +1,4 @@
-"""English teaching interface for operations between conditional events."""
+"""English interface for operations between conditional events."""
 
 from __future__ import annotations
 
@@ -107,7 +107,7 @@ def _render_operation(result: OperationResult, first: ConditionalEvent, second: 
 
 st.title("Operations between conditional events")
 st.markdown(
-    "This teaching tool studies conjunction, disjunction, and iterated "
+    "This Streamlit application studies conjunction, disjunction, and iterated "
     "conditioning in the coherence framework."
 )
 st.latex(r"A|H\in\{1,0,P(A|H)\}\quad\text{according as it is true, false, or void.}")
