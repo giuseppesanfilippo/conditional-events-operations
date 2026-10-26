@@ -1,4 +1,4 @@
-"""Coherence calculations for elementary operations on conditional events."""
+"""Coherence calculations for operations on finite families of conditional events."""
 
 from __future__ import annotations
 
@@ -18,32 +18,22 @@ class ConditionalEvent(NamedTuple):
 
 
 class ConditionalConstituent(NamedTuple):
-    statuses: tuple[str, str]
+    statuses: tuple[str, ...]
     witnesses: tuple[dict[str, bool], ...]
-    q: tuple[float, float]
+    q: tuple[float, ...]
 
 
-class OperationResult(NamedTuple):
+class FamilyOperationResult(NamedTuple):
+    events: tuple[ConditionalEvent, ...]
     operation: str
     symbol: str
     lower: float
     upper: float
     constituents: tuple[ConditionalConstituent, ...]
-    operation_values: tuple[float, ...]
-    lower_lambda: np.ndarray
-    upper_lambda: np.ndarray
-
-
-STATUS_ORDER = {
-    ("T", "T"): 0,
-    ("T", "F"): 1,
-    ("T", "V"): 2,
-    ("F", "T"): 3,
-    ("F", "F"): 4,
-    ("F", "V"): 5,
-    ("V", "T"): 6,
-    ("V", "F"): 7,
-}
+    operation_values: tuple[float | None, ...]
+    lower_lambda: np.ndarray | None
+    upper_lambda: np.ndarray | None
+    exact_system: bool
 
 
 def _parse(formula: str) -> ast.AST:
@@ -53,14 +43,8 @@ def _parse(formula: str) -> ast.AST:
     except SyntaxError as exc:
         raise ValueError(f"Invalid Boolean formula {formula!r}.") from exc
     allowed = (
-        ast.Name,
-        ast.Constant,
-        ast.BoolOp,
-        ast.And,
-        ast.Or,
-        ast.UnaryOp,
-        ast.Not,
-        ast.Load,
+        ast.Name, ast.Constant, ast.BoolOp, ast.And, ast.Or,
+        ast.UnaryOp, ast.Not, ast.Load,
     )
     if any(not isinstance(node, allowed) for node in ast.walk(tree)):
         raise ValueError(
@@ -120,60 +104,57 @@ def _conditional_value(status: str, probability: float) -> float:
 
 
 def build_constituents(
-    first: ConditionalEvent,
-    second: ConditionalEvent,
+    events: Sequence[ConditionalEvent],
     relations: Sequence[str] = (),
 ) -> tuple[ConditionalConstituent, ...]:
-    formulas = [first.event, first.condition, second.event, second.condition]
+    if not events:
+        raise ValueError("Enter at least one conditional event.")
+    formulas = [item for event in events for item in (event.event, event.condition)]
     trees = [_parse(formula) for formula in formulas]
     relation_trees = [_parse_relation(relation) for relation in relations if relation.strip()]
-    primitive_names = sorted(set().union(*(_names(formula) for formula in formulas)))
-    primitive_names = sorted(
-        set(primitive_names).union(
-            *(
-                {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-                for tree in relation_trees
-            )
-        )
+    primitive_names = set().union(*(_names(formula) for formula in formulas))
+    primitive_names.update(
+        node.id
+        for tree in relation_trees
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name)
     )
-    groups: dict[tuple[str, str], list[dict[str, bool]]] = {}
+
+    groups: dict[tuple[str, ...], list[dict[str, bool]]] = {}
     for values in product((False, True), repeat=len(primitive_names)):
-        assignment = dict(zip(primitive_names, values))
+        assignment = dict(zip(sorted(primitive_names), values))
         if any(not _evaluate(tree, assignment) for tree in relation_trees):
             continue
-        first_event, first_condition, second_event, second_condition = (
-            _evaluate(tree, assignment) for tree in trees
+        evaluated = [_evaluate(tree, assignment) for tree in trees]
+        statuses = tuple(
+            _conditional_status(evaluated[2 * index], evaluated[2 * index + 1])
+            for index in range(len(events))
         )
-        statuses = (
-            _conditional_status(first_event, first_condition),
-            _conditional_status(second_event, second_condition),
-        )
-        if statuses == ("V", "V"):
+        if all(status == "V" for status in statuses):
             continue  # C_0: all conditioning events are false.
         groups.setdefault(statuses, []).append(assignment)
-    constituents = [
-        ConditionalConstituent(
-            statuses=statuses,
-            witnesses=tuple(witnesses),
-            q=(
-                _conditional_value(statuses[0], first.probability),
-                _conditional_value(statuses[1], second.probability),
-            ),
+
+    def status_key(statuses: tuple[str, ...]) -> tuple[int, ...]:
+        return tuple({"T": 0, "F": 1, "V": 2}[status] for status in statuses)
+
+    constituents = []
+    for statuses, witnesses in groups.items():
+        constituents.append(
+            ConditionalConstituent(
+                statuses=statuses,
+                witnesses=tuple(witnesses),
+                q=tuple(
+                    _conditional_value(status, event.probability)
+                    for status, event in zip(statuses, events)
+                ),
+            )
         )
-        for statuses, witnesses in groups.items()
-    ]
-    return tuple(
-        sorted(constituents, key=lambda constituent: STATUS_ORDER[constituent.statuses])
-    )
+    return tuple(sorted(constituents, key=lambda item: status_key(item.statuses)))
 
 
-def _operation_value(
-    statuses: tuple[str, str],
-    operation: str,
-    x: float,
-    y: float,
+def _pair_operation_value(
+    statuses: tuple[str, str], operation: str, x: float, y: float
 ) -> float:
-    first_status, second_status = statuses
     if operation == "conjunction":
         if "F" in statuses:
             return 0.0
@@ -195,75 +176,102 @@ def _operation_value(
     raise ValueError(f"Unsupported operation state {statuses!r}.")
 
 
-def _solve_bounds(
-    first: ConditionalEvent,
-    second: ConditionalEvent,
+def _solve_pair(
+    events: tuple[ConditionalEvent, ConditionalEvent],
     constituents: tuple[ConditionalConstituent, ...],
     operation: str,
-) -> OperationResult:
+) -> FamilyOperationResult:
     if not constituents:
-        raise ValueError("Every constituent is C_0: both conditioning events are impossible.")
+        raise ValueError("Every constituent is C_0: all conditioning events are impossible.")
     q = np.asarray([constituent.q for constituent in constituents], dtype=float)
-    p = np.asarray([first.probability, second.probability], dtype=float)
+    probabilities = np.asarray([event.probability for event in events], dtype=float)
     A_eq = np.vstack([q.T, np.ones(len(constituents))])
-    b_eq = np.asarray([*p, 1.0], dtype=float)
+    b_eq = np.asarray([*probabilities, 1.0], dtype=float)
     values = np.asarray(
         [
-            _operation_value(
+            _pair_operation_value(
                 constituent.statuses,
                 operation,
-                first.probability,
-                second.probability,
+                events[0].probability,
+                events[1].probability,
             )
             for constituent in constituents
         ],
         dtype=float,
     )
-    lower = linprog(
-        values,
-        A_eq=A_eq,
-        b_eq=b_eq,
-        bounds=[(0.0, None)] * len(constituents),
-        method="highs",
-    )
-    upper = linprog(
-        -values,
-        A_eq=A_eq,
-        b_eq=b_eq,
-        bounds=[(0.0, None)] * len(constituents),
-        method="highs",
-    )
+    lower = linprog(values, A_eq=A_eq, b_eq=b_eq,
+                    bounds=[(0.0, None)] * len(constituents), method="highs")
+    upper = linprog(-values, A_eq=A_eq, b_eq=b_eq,
+                    bounds=[(0.0, None)] * len(constituents), method="highs")
     if not lower.success or not upper.success or lower.x is None or upper.x is None:
         raise ValueError(
-            "The original conditional assessment is incoherent or the operation "
-            "has no feasible extension."
+            "The conditional assessment is incoherent or the operation has no "
+            "feasible coherent extension."
         )
-    symbol = "z" if operation == "conjunction" else "w"
-    return OperationResult(
+    return FamilyOperationResult(
+        events=events,
         operation=operation,
-        symbol=symbol,
+        symbol="z" if operation == "conjunction" else "w",
         lower=float(lower.fun),
         upper=float(-upper.fun),
         constituents=constituents,
         operation_values=tuple(float(value) for value in values),
         lower_lambda=lower.x,
         upper_lambda=upper.x,
+        exact_system=True,
     )
 
 
-def compute_operation(
-    first: ConditionalEvent,
-    second: ConditionalEvent,
+def compute_family_operation(
+    events: Sequence[ConditionalEvent],
     operation: str,
     relations: Sequence[str] = (),
-) -> OperationResult:
+) -> FamilyOperationResult:
+    """Compute bounds for the conjunction/disjunction of a finite family."""
     if operation not in {"conjunction", "disjunction"}:
-        raise ValueError("The operation must be conjunction or disjunction.")
-    constituents = build_constituents(first, second, relations)
-    return _solve_bounds(first, second, constituents, operation)
+        raise ValueError("Choose conjunction or disjunction.")
+    family = tuple(events)
+    if len(family) < 2:
+        raise ValueError("Enter at least two conditional events for this operation.")
+    constituents = build_constituents(family, relations)
+    if len(family) == 2:
+        return _solve_pair((family[0], family[1]), constituents, operation)
+    if relations:
+        raise ValueError(
+            "For more than two events, the generalized Frechet--Hoeffding "
+            "bounds require logical independence; remove the logical relations."
+        )
+    probabilities = [event.probability for event in family]
+    if operation == "conjunction":
+        lower = max(sum(probabilities) - len(family) + 1, 0.0)
+        upper = min(probabilities)
+        symbol = "z"
+    else:
+        lower = max(probabilities)
+        upper = min(sum(probabilities), 1.0)
+        symbol = "w"
+    values: list[float | None] = []
+    for constituent in constituents:
+        statuses = constituent.statuses
+        if operation == "conjunction":
+            values.append(0.0 if "F" in statuses else 1.0 if all(status == "T" for status in statuses) else None)
+        else:
+            values.append(1.0 if "T" in statuses else 0.0 if all(status == "F" for status in statuses) else None)
+    return FamilyOperationResult(
+        events=family,
+        operation=operation,
+        symbol=symbol,
+        lower=float(lower),
+        upper=float(upper),
+        constituents=constituents,
+        operation_values=tuple(values),
+        lower_lambda=None,
+        upper_lambda=None,
+        exact_system=False,
+    )
 
 
-def iterated_interval(conjunction_result: OperationResult, x: float) -> tuple[float, float]:
+def iterated_interval(conjunction_result: FamilyOperationResult, x: float) -> tuple[float, float]:
     """Return bounds for (B|K)|(A|H), using z = x * mu."""
     if x <= 1e-12:
         return 0.0, 1.0
