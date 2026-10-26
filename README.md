@@ -1,4 +1,4 @@
-# Conditional Events — Operations Teaching Tool
+# Conditional Events — Operations
 
 An English Streamlit application for studying logical operations between two
 conditional events in the coherence framework.
