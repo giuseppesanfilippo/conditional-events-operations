@@ -115,8 +115,8 @@ st.markdown(
     "The conjunction is defined by conditioning the minimum on the event "
     "that at least one of the two conditioning events occurs."
 )
-st.latex(r"(A|H)\wedge(B|K)=\min\{A|H,B|K\}\mid(H\vee K)")
-st.latex(r"(A|H)\vee(B|K)=\bigl[(\overline{A}|H)\wedge(\overline{B}|K)\bigr]^c")
+st.latex(r"(A|H)\wedge(B|K)=\min\{A|H,B|K\}\mid(H\vee K)=(AHBK+x\overline{H}BK+y\overline{K}AH)\mid(H\vee K)")
+st.latex(r"(A|H)\vee(B|K)=1-\bigl[(\overline{A}|H)\wedge(\overline{B}|K)\bigr]")
 st.latex(r"(B|K)|(A|H)=(B|K)\wedge(A|H)+\mu\,\overline{A}|H")
 
 st.subheader("1. Enter two conditional events")
