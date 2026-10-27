@@ -3,16 +3,11 @@
 An English Streamlit application for studying logical operations between two
 conditional events in the coherence framework.
 
-The application covers finite families of conditional events and:
+The first version covers:
 
 - conjunction \\( (A|H)\\wedge(B|K) \\);
 - disjunction \\( (A|H)\\vee(B|K) \\);
 - iterated conditioning \\( (B|K)|(A|H) \\).
-
-For families with more than two conditional events, it also displays the
-generalized Fréchet--Hoeffding bounds for the conjunction and disjunction.
-These generalized bounds are sharp under logical independence of the basic
-events.
 
 For a conditional event \\(A|H\\), the numerical values are \\(1\\), \\(0\\),
 and \\(P(A|H)\\), according as \\(A|H\\) is true, false, or void. The app
