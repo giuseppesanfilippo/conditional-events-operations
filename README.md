@@ -2,7 +2,7 @@
 
 An English Streamlit application for studying logical operations between two
 conditional events in the coherence framework.
-
+Try the application online on [Streamlit](https://vsafswmanv9gjmxasrskbc.streamlit.app).
 The first version covers:
 
 - conjunction \\( (A|H)\\wedge(B|K) \\);
