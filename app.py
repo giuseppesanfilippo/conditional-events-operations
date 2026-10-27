@@ -110,7 +110,8 @@ st.markdown(
     "This Streamlit application studies conjunction, disjunction, and iterated "
     "conditioning in the coherence framework."
 )
-st.latex(r"A|H\in\{1,0,P(A|H)\}\quad\text{according as it is true, false, or void.}")
+st.latex(r"A|H\in\{1,0,x=P(A|H)\}\quad\text{according as it is true, false, or void.}")
+st.latex(r"B|K\in\{1,0,y=P(B|K)\}\quad\text{according as it is true, false, or void.}")
 st.markdown(
     "The conjunction is defined by conditioning the minimum on the event "
     "that at least one of the two conditioning events occurs."
